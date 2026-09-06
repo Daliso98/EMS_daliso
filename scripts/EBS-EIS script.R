@@ -30,16 +30,29 @@ pacman::p_load(
 # Importing data  ---------------------------------------------------------
 # import the raw ems line list 
 
-ems_raw <- import(here("data.raw.xls"))
+ems_raw <- import(here( "data", "data.raw.xls"))
 
 
 # Exploratory analysis  -----------------------------------------------------------
 
 names(ems_raw) # View the variable names 
 
-glimpse(ems_raw) # Get a quick overview of the dataset structure and variable types
+glimpse(ems_raw) # Examine the structure and data types of all variables
+
+skim(ems_raw) # Get an overall summary of the raw EMS dataset
 
 head(ems_raw) # View the first 6 records
 
-class(ems_raw) # Check the type/class of the dataset
+# Check for duplicate EMS IDs among records with an ID
+ems_raw %>%
+  filter(!is.na(`EMS ID`)) %>%
+  count(`EMS ID`) %>%
+  filter(n > 1)
+
+
+
+# Cleaning the data set  --------------------------------------------------
+
+clean <- ems_raw %>% 
+  clean_names() # Create a working copy with standardized variable names
 
