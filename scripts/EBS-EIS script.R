@@ -42,6 +42,10 @@ pacman::p_load(
   naniar,     # Explore missing data
   lubridate,  # Work with dates
   stringr,    # Work with text
+  gtsummary,    # creating tables  
+  scales,       # percents in tables  
+  flextable,    # for making pretty tables
+  ggExtra,      # adding marginal plots to ggplot graphs
   tidyr,      # Organize and reshape data
   tidyverse   # Data manipulation and visualisation — load last
 )
@@ -441,3 +445,243 @@ export(
     "data",
     "clean",
     "ems_clean_dataset.rds" ))
+
+
+
+
+# Testing area ------------------------------------------------------------
+
+# Run these checks to confirm that the cleaning pipeline produced the
+# expected structure, dates, geographic fields, and record classifications.
+# These checks do not modify ems.
+
+
+# Confirm that all EMS date variables have been converted to Date class
+cat("\nDate column classes:\n")
+
+date_cols <- c(
+  "signal_event_registration_date",
+  "verification_date",
+  "event_start_date",
+  "event_intervention_by_date",
+  "public_communication_start_date"
+)
+
+for (col in date_cols) {
+  cat(
+    sprintf(
+      "  %-40s %s\n",
+      col,
+      paste(class(ems[[col]]), collapse = "/")
+    )
+  )
+}
+
+# Check the range of signal registration dates in the current EMS dataset
+cat("\nSignal registration date range:\n")
+cat(
+  "  Earliest:",
+  format(min(ems$signal_event_registration_date, na.rm = TRUE)),
+  "\n"
+)
+cat(
+  "  Latest:  ",
+  format(max(ems$signal_event_registration_date, na.rm = TRUE)),
+  "\n"
+)
+
+
+# Check missing data across the cleaned dataset
+cat("\nMissing data by column:\n")
+
+miss_var_summary(ems) %>%
+  filter(n_miss > 0) %>%
+  arrange(desc(pct_miss)) %>%
+  print(n = Inf)
+
+# Display the unique provinces identified in the dataset
+cat("\nUnique provinces extracted:\n")
+print(sort(unique(ems$province)))
+
+
+
+# Check the distribution of record types
+cat("\nRecord type breakdown:\n")
+
+tabyl(ems, type_of_entry) %>%
+  adorn_totals("row") %>%
+  adorn_pct_formatting() %>%
+  print()
+
+# Check the distribution of verification status
+cat("\nVerification status breakdown:\n")
+
+tabyl(ems, signal_event_verification_status) %>%
+  adorn_totals("row") %>%
+  adorn_pct_formatting() %>%
+  print()
+
+
+# Check the distribution of programme status
+cat("\nProgramme status breakdown:\n")
+
+tabyl(ems, program_status) %>%
+  adorn_totals("row") %>%
+  adorn_pct_formatting() %>%
+  print()
+
+# Check the newly created agent/syndrome field-status variable
+cat("\nAgent/syndrome field-status breakdown:\n")
+
+tabyl(ems, agent_syndrome_field_status) %>%
+  adorn_totals("row") %>%
+  adorn_pct_formatting() %>%
+  print()
+
+# Check the newly created pending-age variable
+cat("\nPending verification age-band breakdown:\n")
+
+tabyl(ems, pending_age_band) %>%
+  adorn_totals("row") %>%
+  adorn_pct_formatting() %>%
+  print()
+
+# Indicator analysis and operational intelligence  ------------------------
+
+# ============================================================
+# INDICATOR 1 — Agent/Syndrome Field Completeness
+# ============================================================
+
+# Define the analysis population as Signals and Events only.
+# Preparedness records and records with no entry type are excluded.
+ind1_data <- ems %>%
+  filter(
+    type_of_entry %in% c("Signal", "Event")
+  )
+
+
+# ------------------------------------------------------------
+# Table 1: Completeness of the structured agent/syndrome field
+# ------------------------------------------------------------
+
+# Set the desired order of the three field-status categories.
+# This keeps the table consistent and operationally interpretable.
+ind1_table <- ind1_data %>%
+  mutate(
+    agent_syndrome_field_status = factor(
+      agent_syndrome_field_status,
+      levels = c(
+        "Dropdown filled",
+        "Label only",
+        "Both fields blank"
+      )
+    )
+  ) %>%
+  select(agent_syndrome_field_status) %>%
+  tbl_summary(
+    statistic = all_categorical() ~ "{n} ({p}%)",
+    missing = "no",
+    label = list(
+      agent_syndrome_field_status ~
+        "Agent/Syndrome Field Status"
+    )
+  )
+
+ind1_table
+
+
+# ------------------------------------------------------------
+# Table 2: Conditions missed from the structured dropdown
+# ------------------------------------------------------------
+
+# Identify the 10 most frequently entered conditions among
+# records where only the free-text label was completed.
+top10_labels <- ind1_data %>%
+  filter(
+    agent_syndrome_field_status == "Label only",
+    !is.na(agent_syndrome_label)
+  ) %>%
+  count(
+    agent_syndrome_label,
+    sort = TRUE
+  ) %>%
+  slice_head(n = 10) %>%
+  pull(agent_syndrome_label)
+
+
+# Keep ALL Label-only records in the denominator.
+# Conditions outside the top 10 are grouped as "Other".
+ind1_label_top10 <- ind1_data %>%
+  filter(
+    agent_syndrome_field_status == "Label only",
+    !is.na(agent_syndrome_label)
+  ) %>%
+  mutate(
+    top10_condition = if_else(
+      agent_syndrome_label %in% top10_labels,
+      agent_syndrome_label,
+      "Other"
+    )
+  ) %>%
+  mutate(
+    top10_condition = factor(
+      top10_condition,
+      levels = c(top10_labels, "Other")
+    )
+  )
+
+
+# Produce the ready-to-use table.
+# Percentages are calculated using ALL Label-only records
+# with a recorded free-text condition as the denominator.
+ind1_label_top10_table <- ind1_label_top10 %>%
+  select(top10_condition) %>%
+  tbl_summary(
+    statistic = all_categorical() ~ "{n} ({p}%)",
+    missing = "no",
+    label = list(
+      top10_condition ~
+        "Condition entered in free-text field"
+    )
+  )
+
+ind1_label_top10_table
+
+
+# ------------------------------------------------------------
+# Chart: Top conditions entered in the free-text field
+# ------------------------------------------------------------
+
+# Calculate the percentage distribution for the top 10
+# free-text conditions using all Label-only records as denominator.
+ind1_label_chart_data <- ind1_data %>%
+  filter(
+    agent_syndrome_field_status == "Label only",
+    !is.na(agent_syndrome_label)
+  ) %>%
+  count(
+    agent_syndrome_label,
+    sort = TRUE
+  ) %>%
+  mutate(
+    percentage = 100 * n / sum(n)
+  ) %>%
+  slice_head(n = 10)
+
+
+# Plot the top 10 conditions as percentages.
+ggplot(
+  ind1_label_chart_data,
+  aes(
+    x = reorder(agent_syndrome_label, percentage),
+    y = percentage
+  )
+) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Top Conditions Entered in the Free-Text Agent/Syndrome Field",
+    x = "Condition",
+    y = "Percentage of Label-Only Records (%)"
+  ) +
+  theme_minimal()
