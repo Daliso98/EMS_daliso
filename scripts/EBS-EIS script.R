@@ -57,6 +57,7 @@ pacman::p_load(
 ems_raw <- import(here( "data", "data.raw.xls"))
 
 
+
 # Exploratory data analysis  --------------------------------------------------
 
 # this section helps us to understand the structure of 
@@ -549,11 +550,10 @@ tabyl(ems, pending_age_band) %>%
 # Indicator analysis and operational intelligence  ------------------------
 
 # ============================================================
-# INDICATOR 1 — Agent/Syndrome Field Completeness
+# INDICATOR 1 — AGENT/SYNDROME FIELD COMPLETENESS
 # ============================================================
 
 # Define the analysis population as Signals and Events only.
-# Preparedness records and records with no entry type are excluded.
 ind1_data <- ems %>%
   filter(
     type_of_entry %in% c("Signal", "Event")
@@ -561,11 +561,11 @@ ind1_data <- ems %>%
 
 
 # ------------------------------------------------------------
-# Table 1: Completeness of the structured agent/syndrome field
+# Table 1: Use of the agent/syndrome fields
 # ------------------------------------------------------------
 
-# Set the desired order of the three field-status categories.
-# This keeps the table consistent and operationally interpretable.
+# Summarise whether the structured dropdown, free-text field,
+# or neither field was used.
 ind1_table <- ind1_data %>%
   mutate(
     agent_syndrome_field_status = factor(
@@ -591,70 +591,67 @@ ind1_table
 
 
 # ------------------------------------------------------------
-# Table 2: Conditions missed from the structured dropdown
+# Chart 1: Top 10 conditions selected through the dropdown
+# ------------------------------------------------------------
+
+# Identify the 10 most frequently selected conditions
+# through the structured agent/syndrome dropdown.
+ind1_dropdown_top10 <- ind1_data %>%
+  filter(
+    !is.na(agent_syndrome)
+  ) %>%
+  count(
+    agent_syndrome,
+    sort = TRUE
+  ) %>%
+  mutate(
+    percentage = 100 * n / sum(n)
+  ) %>%
+  slice_head(n = 10)
+
+
+# Plot the top 10 structured dropdown conditions.
+ggplot(
+  ind1_dropdown_top10,
+  aes(
+    x = reorder(agent_syndrome, percentage),
+    y = percentage
+  )
+) +
+  geom_col(
+    fill = "steelblue"
+  ) +
+  geom_text(
+    aes(
+      label = paste0(round(percentage, 1), "%")
+    ),
+    hjust = -0.1,
+    size = 3.5
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = function(x) paste0(x, "%"),
+    expand = expansion(mult = c(0, 0.12))
+  ) +
+  labs(
+    title = "Top 10 Conditions Selected Through Structured Dropdown",
+    x = "Condition",
+    y = "Percentage of Dropdown Records"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.title = element_text(face = "bold")
+  )
+
+
+# ------------------------------------------------------------
+# Chart 2: Top 10 conditions entered only through free text
 # ------------------------------------------------------------
 
 # Identify the 10 most frequently entered conditions among
-# records where only the free-text label was completed.
-top10_labels <- ind1_data %>%
-  filter(
-    agent_syndrome_field_status == "Label only",
-    !is.na(agent_syndrome_label)
-  ) %>%
-  count(
-    agent_syndrome_label,
-    sort = TRUE
-  ) %>%
-  slice_head(n = 10) %>%
-  pull(agent_syndrome_label)
-
-
-# Keep ALL Label-only records in the denominator.
-# Conditions outside the top 10 are grouped as "Other".
-ind1_label_top10 <- ind1_data %>%
-  filter(
-    agent_syndrome_field_status == "Label only",
-    !is.na(agent_syndrome_label)
-  ) %>%
-  mutate(
-    top10_condition = if_else(
-      agent_syndrome_label %in% top10_labels,
-      agent_syndrome_label,
-      "Other"
-    )
-  ) %>%
-  mutate(
-    top10_condition = factor(
-      top10_condition,
-      levels = c(top10_labels, "Other")
-    )
-  )
-
-
-# Produce the ready-to-use table.
-# Percentages are calculated using ALL Label-only records
-# with a recorded free-text condition as the denominator.
-ind1_label_top10_table <- ind1_label_top10 %>%
-  select(top10_condition) %>%
-  tbl_summary(
-    statistic = all_categorical() ~ "{n} ({p}%)",
-    missing = "no",
-    label = list(
-      top10_condition ~
-        "Condition entered in free-text field"
-    )
-  )
-
-ind1_label_top10_table
-
-
-# ------------------------------------------------------------
-# Chart: Top conditions entered in the free-text field
-# ------------------------------------------------------------
-
-# Calculate the percentage distribution for the top 10
-# free-text conditions using all Label-only records as denominator.
-ind1_label_chart_data <- ind1_data %>%
+# records where the structured dropdown was not completed.
+ind1_free_text_top10 <- ind1_data %>%
   filter(
     agent_syndrome_field_status == "Label only",
     !is.na(agent_syndrome_label)
@@ -669,19 +666,114 @@ ind1_label_chart_data <- ind1_data %>%
   slice_head(n = 10)
 
 
-# Plot the top 10 conditions as percentages.
+# Plot the top 10 free-text-only conditions.
 ggplot(
-  ind1_label_chart_data,
+  ind1_free_text_top10,
   aes(
     x = reorder(agent_syndrome_label, percentage),
     y = percentage
   )
 ) +
-  geom_col() +
-  coord_flip() +
-  labs(
-    title = "Top Conditions Entered in the Free-Text Agent/Syndrome Field",
-    x = "Condition",
-    y = "Percentage of Label-Only Records (%)"
+  geom_col(
+    fill = "steelblue"
   ) +
-  theme_minimal()
+  geom_text(
+    aes(
+      label = paste0(round(percentage, 1), "%")
+    ),
+    hjust = -0.1,
+    size = 3.5
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = function(x) paste0(x, "%"),
+    expand = expansion(mult = c(0, 0.12))
+  ) +
+  labs(
+    title = "Top 10 Conditions Entered Only Through Free Text",
+    x = "Condition",
+    y = "Percentage of Free-Text-Only Records"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.title = element_text(face = "bold")
+  )
+
+  
+
+# Indicator 3 — Signals: top 10 districts with missing source
+
+ems %>%
+  filter(type_of_entry == "Signal") %>%
+  group_by(district) %>%
+  summarise(
+    Records = n(),
+    Missing = sum(is.na(signal_source)),
+    `% Missing` = round(100 * Missing / Records, 1),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Missing)) %>%
+  slice_head(n = 10) %>%
+  gt::gt() %>%
+  gt::tab_header(
+    title = "Top 10 Districts with Signals Missing a Source"
+  ) %>%
+  gt::grand_summary_rows(
+    columns = c(Records, Missing),
+    fns = list(
+      Total = ~sum(.)
+    ),
+    use_seps = TRUE
+  )
+
+
+# Indicator 3 — Events: top 10 districts with missing source
+
+ems %>%
+  filter(type_of_entry == "Event") %>%
+  group_by(district) %>%
+  summarise(
+    Records = n(),
+    Missing = sum(is.na(event_source)),
+    `% Missing` = round(100 * Missing / Records, 1),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Missing)) %>%
+  slice_head(n = 10) %>%
+  gt::gt() %>%
+  gt::tab_header(
+    title = "Top 10 Districts with Events Missing a Source"
+  ) %>%
+  gt::grand_summary_rows(
+    columns = c(Records, Missing),
+    fns = list(
+      Total = ~sum(.)
+    ),
+    use_seps = TRUE
+  )
+
+
+# Indicator 4 — Signals with no verification status
+
+ems %>%
+  filter(type_of_entry == "Signal") %>%
+  group_by(district) %>%
+  summarise(
+    Records = n(),
+    Missing = sum(is.na(signal_event_verification_status)),
+    `% Missing` = round(100 * Missing / Records, 1),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Missing)) %>%
+  slice_head(n = 10) %>%
+  gt::gt() %>%
+  gt::tab_header(
+    title = "Top 10 Districts with Signals Missing Verification Status"
+  ) %>%
+  gt::grand_summary_rows(
+    columns = c(Records, Missing),
+    fns = list(
+      Total = ~sum(.)
+    )
+  )
