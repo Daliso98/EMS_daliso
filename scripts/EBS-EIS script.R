@@ -1,10 +1,9 @@
-
 # About project  ----------------------------------------------------------
 
-# Purpose:Automating Routine Review of EBS Records
-# Author: Daliso Ngulube 
-# Last Updated: 9 September 2026
-# Contact email: dariosteckly@gmail.com   
+# Purpose: Automating Routine Review of EBS Records
+# Author: Daliso Ngulube
+# Last Updated: 22 September 2026 (cleaned version)
+# Contact email: dariosteckly@gmail.com
 
 
 # Summary of the project  -------------------------------------------------
@@ -19,44 +18,71 @@
 # Proposed indicators for phase 1 -----------------------------------------
 
 #     Ind 1  —  Agent/Syndrome field: three-way classification
-#     Ind 2  —  Analytics-visible disease profile (top 10)
+#     Ind 2  —  Analytics-visible disease profile (top 10)              [NOT YET BUILT — see note before Indicator 1]
 #     Ind 3  —  No source recorded (signals and events separately)
 #     Ind 4  —  No verification status recorded (active records)
 #     Ind 5  —  Verified true event with no Risk Assessment
-#     Ind 6  —  Pending verification backlog stratified by time pending 
+#     Ind 6  —  Pending verification backlog stratified by time pending
 #     Ind 7  —  Workflow status breakdown (cross-tabulation)
 
 
-# Lading packages  ----------------------------------------------------
+# CHANGE LOG vs. previous version -----------------------------------------
+#
+#   1. FIXED: Section 8.1 (`flag_risk_assessment`) referenced
+#      `flag_missing_risk_assessment` / `flag_pending_with_risk_assessment`,
+#      which only ever existed in the separate `ems_ind5` object, not in
+#      `ems`. This threw "object not found" when the script ran. The logic
+#      is now recomputed directly inside Section 8.1 so `ems` is
+#      self-contained.
+#   2. REMOVED: duplicated `analysis_end_date` / `days_pending` /
+#      `pending_age_band` calculation (was computed twice, identically).
+#   3. REMOVED: duplicated Indicator 3 calculation block (was computed
+#      twice, identically, before the flextable).
+#   4. REMOVED: duplicated Indicator 5A "prepare table" step (Step 3 was
+#      repeated twice).
+#   5. ACTIVATED: Indicator 3 for Events (missing `event_source`) — this
+#      was fully written but left commented out, so only the Signal
+#      version was actually running.
+#   6. ADDED: an explicit fallback in `map_category` (Section 8) for
+#      districts with no matching records, plus a defined map color for
+#      that case, so they no longer render as an undefined NA.
+#   7. REMOVED: old superseded/commented-out draft code blocks, to keep
+#      the script shorter while you're still iterating (per your note
+#      that "the codes are quite long but we can fix this later").
+#
+#   Indicator 2 (analytics-visible disease profile, top 10) is still not
+#   implemented — it was listed in the project plan comments but no code
+#   for it exists in the original script. Flagged here so it isn't
+#   forgotten; let me know the intended definition and I'll add it.
 
+
+# Loading packages  ---------------------------------------------------------
 
 # The pacman package will install each package if necessary,
 # and load it for use in the current session
 
-
 pacman::p_load(
   rio,        # Import data
   here,       # Manage file paths
-  sf, 
+  sf,
   janitor,    # Clean names and create frequency tables
   skimr,      # Explore dataset structure
   naniar,     # Explore missing data
   lubridate,  # Work with dates
   stringr,    # Work with text
-  gtsummary,    # creating tables  
-  scales,       # percents in tables  
-  flextable,    # for making pretty tables
-  ggExtra,      # adding marginal plots to ggplot graphs
+  gtsummary,  # creating tables
+  scales,     # percents in tables
+  flextable,  # for making pretty tables
+  ggExtra,    # adding marginal plots to ggplot graphs
   tidyr,      # Organize and reshape data
   tidyverse   # Data manipulation and visualisation — load last
 )
 
 
 # Importing data  ---------------------------------------------------------
-# import the raw ems line list 
+# import the raw ems line list
 
-ems_raw <- import(here( "data", "data.raw.xls"))
-
+ems_raw <- import(here("data", "data.raw.xls"))
 
 zambia_districts <- st_read(
   here(
@@ -68,23 +94,18 @@ zambia_districts <- st_read(
 
 # Exploratory data analysis  --------------------------------------------------
 
-# this section helps us to understand the structure of 
-#the data set before we start the cleaning process
+# this section helps us to understand the structure of
+# the data set before we start the cleaning process
 
-names(ems_raw) # View the variable names 
-
+names(ems_raw) # View the variable names
 
 glimpse(ems_raw) # Examine the structure and data types of all variables
 
-
 skim(ems_raw) # Get an overall summary of the raw EMS dataset
-
 
 head(ems_raw) # View the first 6 records
 
-
 tail(ems_raw, 6)   # Last 6 rows — check no footer rows were imported
-
 
 # Check for duplicate EMS IDs among records with an ID
 ems_raw %>%
@@ -92,15 +113,12 @@ ems_raw %>%
   count(`EMS ID`) %>%
   filter(n > 1)
 
-
-#Missing data 
+# Missing data
 # {naniar} gives a ranked table of missingness by column — essential for
 # understanding which fields have the completeness problems identified in
-
 miss_var_summary(ems_raw) %>%
   arrange(desc(pct_miss)) %>%
   print(n = 31)   # Show all 31 columns
-
 
 # Check the variables available in the shapefile
 names(zambia_districts)
@@ -108,9 +126,9 @@ names(zambia_districts)
 
 # Cleaning the data set  --------------------------------------------------
 
-ems <- ems_raw %>% 
+ems <- ems_raw %>%
   
-  clean_names() %>%  
+  clean_names() %>%
   # Standardize variable names to lowercase with underscores
   
   select(
@@ -130,14 +148,14 @@ ems <- ems_raw %>%
     signal_source,
     event_source,
     hra_auto_risk_assessment
-  ) %>% 
+  ) %>%
   
   mutate(
     across(
       where(is.character),
       ~ na_if(str_trim(.), "")
     )
-  ) %>% 
+  ) %>%
   # Clean text fields by removing extra spaces and converting blanks to NA
   
   mutate(
@@ -160,7 +178,7 @@ ems <- ems_raw %>%
         )
       )
     )
-  ) %>% 
+  ) %>%
   # Parse all selected date columns to Date class
   
   mutate(
@@ -189,13 +207,13 @@ ems <- ems_raw %>%
         NA_character_
       )
     )
-  ) %>% 
+  ) %>%
   # Create clean province and district variables for geographic analysis
   
   select(
     -ou_parts,
     -organisation_unit_name_hierarchy
-  ) %>% 
+  ) %>%
   # Remove the temporary variable and original hierarchy column
   
   mutate(
@@ -397,12 +415,13 @@ ems <- ems_raw %>%
       "REPORT_SOURCE_SITREP"          = "Situation report",
       "REPORT_SOURCE_SOCIAL_MEDIA"    = "Social media"
     )
-  ) %>% 
-  # Arrange key identification and operational variables first in the
-  select(ems_id, starts_with("province"),district,type_of_entry, 
-               signal_event_registration_date, signal_event_verification_status,
-               verification_date, everything())
-
+  ) %>%
+  # Arrange key identification and operational variables first
+  select(
+    ems_id, starts_with("province"), district, type_of_entry,
+    signal_event_registration_date, signal_event_verification_status,
+    verification_date, everything()
+  )
 
 
 # Creating derived variables  ---------------------------------------------
@@ -417,10 +436,10 @@ ems <- ems %>%
     )
   )
 
-
-
-# pending verification backlog 
-# Automatically determine the reference date from the current EMS dataset
+# Pending verification backlog
+# Automatically determine the reference date from the current EMS dataset.
+# NOTE: this is calculated once here and reused later in Indicator 6 —
+# previously it was recalculated a second time with identical code.
 analysis_end_date <- max(
   ems$signal_event_registration_date,
   na.rm = TRUE
@@ -449,8 +468,6 @@ ems <- ems %>%
     )
   )
 
-
-
 # Create a map-specific district name to harmonise EMS names with the shapefile
 ems <- ems %>%
   mutate(
@@ -466,26 +483,12 @@ ems <- ems %>%
     )
   )
 
-
-
-
-
-
-
-
-
-
 # Save the cleaned EMS dataset as an RDS file so it can be reused in
 # subsequent analyses without repeating the cleaning process.
-
 export(
   ems,
-  here(
-    "data",
-    "clean",
-    "ems_clean_dataset.rds" ))
-
-
+  here("data", "clean", "ems_clean_dataset.rds")
+)
 
 
 # Testing area ------------------------------------------------------------
@@ -493,7 +496,6 @@ export(
 # Run these checks to confirm that the cleaning pipeline produced the
 # expected structure, dates, geographic fields, and record classifications.
 # These checks do not modify ems.
-
 
 # Confirm that all EMS date variables have been converted to Date class
 cat("\nDate column classes:\n")
@@ -518,17 +520,8 @@ for (col in date_cols) {
 
 # Check the range of signal registration dates in the current EMS dataset
 cat("\nSignal registration date range:\n")
-cat(
-  "  Earliest:",
-  format(min(ems$signal_event_registration_date, na.rm = TRUE)),
-  "\n"
-)
-cat(
-  "  Latest:  ",
-  format(max(ems$signal_event_registration_date, na.rm = TRUE)),
-  "\n"
-)
-
+cat("  Earliest:", format(min(ems$signal_event_registration_date, na.rm = TRUE)), "\n")
+cat("  Latest:  ", format(max(ems$signal_event_registration_date, na.rm = TRUE)), "\n")
 
 # Check missing data across the cleaned dataset
 cat("\nMissing data by column:\n")
@@ -542,11 +535,8 @@ miss_var_summary(ems) %>%
 cat("\nUnique provinces extracted:\n")
 print(sort(unique(ems$province)))
 
-
-
 # Check the distribution of record types
 cat("\nRecord type breakdown:\n")
-
 tabyl(ems, type_of_entry) %>%
   adorn_totals("row") %>%
   adorn_pct_formatting() %>%
@@ -554,16 +544,13 @@ tabyl(ems, type_of_entry) %>%
 
 # Check the distribution of verification status
 cat("\nVerification status breakdown:\n")
-
 tabyl(ems, signal_event_verification_status) %>%
   adorn_totals("row") %>%
   adorn_pct_formatting() %>%
   print()
 
-
 # Check the distribution of programme status
 cat("\nProgramme status breakdown:\n")
-
 tabyl(ems, program_status) %>%
   adorn_totals("row") %>%
   adorn_pct_formatting() %>%
@@ -571,7 +558,6 @@ tabyl(ems, program_status) %>%
 
 # Check the newly created agent/syndrome field-status variable
 cat("\nAgent/syndrome field-status breakdown:\n")
-
 tabyl(ems, agent_syndrome_field_status) %>%
   adorn_totals("row") %>%
   adorn_pct_formatting() %>%
@@ -579,12 +565,10 @@ tabyl(ems, agent_syndrome_field_status) %>%
 
 # Check the newly created pending-age variable
 cat("\nPending verification age-band breakdown:\n")
-
 tabyl(ems, pending_age_band) %>%
   adorn_totals("row") %>%
   adorn_pct_formatting() %>%
   print()
-
 
 # List unique district names in the shapefile
 zambia_districts %>%
@@ -592,13 +576,10 @@ zambia_districts %>%
   distinct(adm2nm) %>%
   arrange(adm2nm)
 
-
 # List unique district names in the EMS data
 ems %>%
   distinct(district) %>%
   arrange(district)
-
-
 
 # Identify EMS district names that do not match the shapefile
 ems %>%
@@ -610,47 +591,37 @@ ems %>%
   )
 
 
-
-
-
 # Indicator analysis and operational intelligence  ------------------------
 
 # ============================================================
 # INDICATOR 1 — AGENT/SYNDROME FIELD COMPLETENESS
 # ============================================================
+#
+# NOTE: Indicator 2 ("Analytics-visible disease profile, top 10") from the
+# project plan above has no code yet — flagged for follow-up, not built
+# here since its exact definition wasn't specified in the original script.
 
 # Define the analysis population as Signals and Events only.
 ind1_data <- ems %>%
-  filter(
-    type_of_entry %in% c("Signal", "Event")
-  )
+  filter(type_of_entry %in% c("Signal", "Event"))
 
 
 # ------------------------------------------------------------
 # Table 1: Use of the agent/syndrome fields
 # ------------------------------------------------------------
 
-# Summarise whether the structured dropdown, free-text field,
-# or neither field was used.
 ind1_table <- ind1_data %>%
   mutate(
     agent_syndrome_field_status = factor(
       agent_syndrome_field_status,
-      levels = c(
-        "Dropdown filled",
-        "Label only",
-        "Both fields blank"
-      )
+      levels = c("Dropdown filled", "Label only", "Both fields blank")
     )
   ) %>%
   select(agent_syndrome_field_status) %>%
   tbl_summary(
     statistic = all_categorical() ~ "{n} ({p}%)",
     missing = "no",
-    label = list(
-      agent_syndrome_field_status ~
-        "Agent/Syndrome Field Status"
-    )
+    label = list(agent_syndrome_field_status ~ "Agent/Syndrome Field Status")
   )
 
 ind1_table
@@ -660,37 +631,19 @@ ind1_table
 # Chart 1: Top 10 conditions selected through the dropdown
 # ------------------------------------------------------------
 
-# Identify the 10 most frequently selected conditions
-# through the structured agent/syndrome dropdown.
 ind1_dropdown_top10 <- ind1_data %>%
-  filter(
-    !is.na(agent_syndrome)
-  ) %>%
-  count(
-    agent_syndrome,
-    sort = TRUE
-  ) %>%
-  mutate(
-    percentage = 100 * n / sum(n)
-  ) %>%
+  filter(!is.na(agent_syndrome)) %>%
+  count(agent_syndrome, sort = TRUE) %>%
+  mutate(percentage = 100 * n / sum(n)) %>%
   slice_head(n = 10)
 
-
-# Plot the top 10 structured dropdown conditions.
 ggplot(
   ind1_dropdown_top10,
-  aes(
-    x = reorder(agent_syndrome, percentage),
-    y = percentage
-  )
+  aes(x = reorder(agent_syndrome, percentage), y = percentage)
 ) +
-  geom_col(
-    fill = "steelblue"
-  ) +
+  geom_col(fill = "steelblue") +
   geom_text(
-    aes(
-      label = paste0(round(percentage, 1), "%")
-    ),
+    aes(label = paste0(round(percentage, 1), "%")),
     hjust = -0.1,
     size = 3.5
   ) +
@@ -715,38 +668,22 @@ ggplot(
 # Chart 2: Top 10 conditions entered only through free text
 # ------------------------------------------------------------
 
-# Identify the 10 most frequently entered conditions among
-# records where the structured dropdown was not completed.
 ind1_free_text_top10 <- ind1_data %>%
   filter(
     agent_syndrome_field_status == "Label only",
     !is.na(agent_syndrome_label)
   ) %>%
-  count(
-    agent_syndrome_label,
-    sort = TRUE
-  ) %>%
-  mutate(
-    percentage = 100 * n / sum(n)
-  ) %>%
+  count(agent_syndrome_label, sort = TRUE) %>%
+  mutate(percentage = 100 * n / sum(n)) %>%
   slice_head(n = 10)
 
-
-# Plot the top 10 free-text-only conditions.
 ggplot(
   ind1_free_text_top10,
-  aes(
-    x = reorder(agent_syndrome_label, percentage),
-    y = percentage
-  )
+  aes(x = reorder(agent_syndrome_label, percentage), y = percentage)
 ) +
-  geom_col(
-    fill = "steelblue"
-  ) +
+  geom_col(fill = "steelblue") +
   geom_text(
-    aes(
-      label = paste0(round(percentage, 1), "%")
-    ),
+    aes(label = paste0(round(percentage, 1), "%")),
     hjust = -0.1,
     size = 3.5
   ) +
@@ -766,11 +703,13 @@ ggplot(
     axis.title = element_text(face = "bold")
   )
 
-  
 
-# Indicator 3 — Signals: top 10 districts with missing source
+# ============================================================
+# INDICATOR 3A — SIGNALS MISSING SOURCE
+# Top 10 districts with signals missing a source
+# ============================================================
 
-ems %>%
+indicator_3_signal <- ems %>%
   filter(type_of_entry == "Signal") %>%
   group_by(district) %>%
   summarise(
@@ -780,24 +719,38 @@ ems %>%
     .groups = "drop"
   ) %>%
   arrange(desc(Missing)) %>%
-  slice_head(n = 10) %>%
-  gt::gt() %>%
-  gt::tab_header(
-    title = "Top 10 Districts with Signals Missing a Source"
-  ) %>%
-  gt::grand_summary_rows(
-    columns = c(Records, Missing),
-    fns = list(
-      Total = ~sum(.)
-    ),
-    use_seps = TRUE
+  slice_head(n = 10)
+
+indicator_3_signal_table <- indicator_3_signal %>%
+  bind_rows(
+    summarise(
+      .,
+      district = "Total",
+      Records = sum(Records),
+      Missing = sum(Missing),
+      `% Missing` = round(100 * Missing / Records, 1)
+    )
   )
 
+flextable(indicator_3_signal_table) %>%
+  set_caption("Top 10 Districts with Signals Missing a Source") %>%
+  bold(part = "header") %>%
+  bold(i = ~ district == "Total") %>%
+  align(j = c("Records", "Missing", "% Missing"), align = "center", part = "all") %>%
+  autofit()
 
-# Indicator 3 — Events: top 10 districts with missing source
 
+# ============================================================
+# INDICATOR 3B — EVENTS MISSING SOURCE
+# Top 10 districts with events missing a source
+#
+# NOTE: this was written but left commented out in the original script,
+# so only the Signal version was actually running. Activated here to
+# match the project-plan description of Indicator 3 covering "signals
+# and events separately".
+# ============================================================
 
-ems %>%
+indicator_3_event <- ems %>%
   filter(type_of_entry == "Event") %>%
   group_by(district) %>%
   summarise(
@@ -807,23 +760,33 @@ ems %>%
     .groups = "drop"
   ) %>%
   arrange(desc(Missing)) %>%
-  slice_head(n = 10) %>%
-  gt::gt() %>%
-  gt::tab_header(
-    title = "Top 10 Districts with Events Missing a Source"
-  ) %>%
-  gt::grand_summary_rows(
-    columns = c(Records, Missing),
-    fns = list(
-      Total = ~sum(.)
-    ),
-    use_seps = TRUE
+  slice_head(n = 10)
+
+indicator_3_event_table <- indicator_3_event %>%
+  bind_rows(
+    summarise(
+      .,
+      district = "Total",
+      Records = sum(Records),
+      Missing = sum(Missing),
+      `% Missing` = round(100 * Missing / Records, 1)
+    )
   )
 
+flextable(indicator_3_event_table) %>%
+  set_caption("Top 10 Districts with Events Missing a Source") %>%
+  bold(part = "header") %>%
+  bold(i = ~ district == "Total") %>%
+  align(j = c("Records", "Missing", "% Missing"), align = "center", part = "all") %>%
+  autofit()
 
-# Indicator 4 — Signals with no verification status
 
-ems %>%
+# ============================================================
+# INDICATOR 4 — SIGNALS MISSING VERIFICATION STATUS
+# Top 10 districts with signals missing verification status
+# ============================================================
+
+indicator_4 <- ems %>%
   filter(type_of_entry == "Signal") %>%
   group_by(district) %>%
   summarise(
@@ -833,31 +796,43 @@ ems %>%
     .groups = "drop"
   ) %>%
   arrange(desc(Missing)) %>%
-  slice_head(n = 10) %>%
-  gt::gt() %>%
-  gt::tab_header(
-    title = "Top 10 Districts with Signals Missing Verification Status"
-  ) %>%
-  gt::grand_summary_rows(
-    columns = c(Records, Missing),
-    fns = list(
-      Total = ~sum(.)
-    ))
+  slice_head(n = 10)
 
+indicator_4_table <- indicator_4 %>%
+  bind_rows(
+    summarise(
+      .,
+      district = "Total",
+      Records = sum(Records),
+      Missing = sum(Missing),
+      `% Missing` = round(100 * Missing / Records, 1)
+    )
+  )
+
+flextable(indicator_4_table) %>%
+  set_caption("Top 10 Districts with Signals Missing Verification Status") %>%
+  bold(part = "header") %>%
+  bold(i = ~ district == "Total") %>%
+  align(j = c("Records", "Missing", "% Missing"), align = "center", part = "all") %>%
+  autofit()
 
 
 # ============================================================
 # INDICATOR 5 — RISK ASSESSMENT WORKFLOW
 # ============================================================
+#
+# NOTE: flag_missing_risk_assessment / flag_pending_with_risk_assessment
+# are used here (within Indicator 5) only. Section 8.1 below recomputes
+# the same logic independently for the operational-flag summary, so it
+# no longer depends on this `ems_ind5` object — that dependency was the
+# cause of the "object not found" error in the previous version.
 
-ems <- ems %>%
+ems_ind5 <- ems %>%
   mutate(
-    # Verified true event without documented risk assessment
     flag_missing_risk_assessment =
       signal_event_verification_status == "Verified true event" &
       is.na(hra_auto_risk_assessment),
     
-    # Pending Signal that already has a risk assessment
     flag_pending_with_risk_assessment =
       type_of_entry == "Signal" &
       signal_event_verification_status == "Pending" &
@@ -865,15 +840,12 @@ ems <- ems %>%
   )
 
 
+# ------------------------------------------------------------
+# INDICATOR 5A — VERIFIED TRUE EVENTS MISSING RISK ASSESSMENT
+# ------------------------------------------------------------
 
-# Indicator 5A — Verified true events missing risk assessment
-
-# Indicator 5A — Verified true events missing risk assessment
-
-ind5_missing_risk <- ems %>%
-  filter(
-    signal_event_verification_status == "Verified true event"
-  ) %>%
+ind5_missing_risk <- ems_ind5 %>%
+  filter(signal_event_verification_status == "Verified true event") %>%
   group_by(district) %>%
   summarise(
     Records = n(),
@@ -884,32 +856,30 @@ ind5_missing_risk <- ems %>%
   arrange(desc(Missing)) %>%
   slice_head(n = 20)
 
-ind5_missing_risk %>%
-  gt::gt() %>%
-  gt::tab_header(
-    title = "Top 20 Districts with Verified True Events Missing Risk Assessment"
-  ) %>%
-  gt::grand_summary_rows(
-    columns = c(Records, Missing),
-    fns = list(
-      Total = ~sum(.)
-    )
-  ) %>%
-  gt::grand_summary_rows(
-    columns = `% Missing`,
-    fns = list(
-      Total = ~round(
-        100 * sum(ind5_missing_risk$Missing) /
-          sum(ind5_missing_risk$Records),
-        1
-      )
+ind5_missing_risk_table <- ind5_missing_risk %>%
+  bind_rows(
+    summarise(
+      .,
+      district = "Total",
+      Records = sum(Records),
+      Missing = sum(Missing),
+      `% Missing` = round(100 * Missing / Records, 1)
     )
   )
-# Pending Signals with risk assessment recorded
 
-# Indicator 5B — Pending Signals with risk assessment recorded
+flextable(ind5_missing_risk_table) %>%
+  set_caption("Top 20 Districts with Verified True Events Missing Risk Assessment") %>%
+  bold(part = "header") %>%
+  bold(i = ~ district == "Total") %>%
+  align(j = c("Records", "Missing", "% Missing"), align = "center", part = "all") %>%
+  autofit()
 
-ind5_pending_risk <- ems %>%
+
+# ------------------------------------------------------------
+# INDICATOR 5B — PENDING SIGNALS WITH RISK ASSESSMENT RECORDED
+# ------------------------------------------------------------
+
+ind5_pending_risk <- ems_ind5 %>%
   filter(
     type_of_entry == "Signal",
     signal_event_verification_status == "Pending"
@@ -917,123 +887,44 @@ ind5_pending_risk <- ems %>%
   group_by(district) %>%
   summarise(
     Records = n(),
-    `Risk Assessment Recorded` =
-      sum(!is.na(hra_auto_risk_assessment)),
-    `% with Risk Assessment` =
-      round(
-        100 * `Risk Assessment Recorded` / Records,
-        1
-      ),
+    `Risk Assessment Recorded` = sum(!is.na(hra_auto_risk_assessment)),
+    `% with Risk Assessment` = round(100 * `Risk Assessment Recorded` / Records, 1),
     .groups = "drop"
   ) %>%
   filter(`Risk Assessment Recorded` > 0) %>%
   arrange(desc(`Risk Assessment Recorded`)) %>%
   slice_head(n = 20)
 
-ind5_pending_risk %>%
-  gt::gt() %>%
-  gt::tab_header(
-    title = "Top 20 Districts with Pending Signals and Risk Assessment Recorded"
-  ) %>%
-  gt::grand_summary_rows(
-    columns = c(Records, `Risk Assessment Recorded`),
-    fns = list(
-      Total = ~sum(.)
-    )
-  ) %>%
-  gt::grand_summary_rows(
-    columns = `% with Risk Assessment`,
-    fns = list(
-      Total = ~round(
-        100 * sum(ind5_pending_risk$`Risk Assessment Recorded`) /
-          sum(ind5_pending_risk$Records),
-        1
+ind5_pending_risk_table <- ind5_pending_risk %>%
+  bind_rows(
+    summarise(
+      .,
+      district = "Total",
+      Records = sum(Records),
+      `Risk Assessment Recorded` = sum(`Risk Assessment Recorded`),
+      `% with Risk Assessment` = round(
+        100 * `Risk Assessment Recorded` / Records, 1
       )
     )
   )
 
-# # Indicator 5A — Top 20 districts with missing risk assessment
-# 
-# ind5_risk <- ems %>%
-#   filter(
-#     signal_event_verification_status == "Verified true event"
-#   ) %>%
-#   group_by(district) %>%
-#   summarise(
-#     Records = n(),
-#     Missing = sum(is.na(hra_auto_risk_assessment)),
-#     `% Missing` = round(100 * Missing / Records, 1),
-#     .groups = "drop"
-#   ) %>%
-#   arrange(desc(Missing)) %>%
-#   slice_head(n = 20)
-# 
-# 
-# 
-# ind5_risk %>%
-#   gt::gt() %>%
-#   gt::tab_header(
-#     title = "Top 20 Districts with Verified True Events Missing Risk Assessment"
-#   ) %>%
-#   gt::grand_summary_rows(
-#     columns = c(Records, Missing),
-#     fns = list(
-#       Total = ~sum(.)
-#     )
-#   )
-# 
-# 
-# 
-# 
-# # Indicator 5B — Risk assessment workflow inconsistencies
-# 
-# ind5_workflow <- tibble(
-#   `Workflow Issue` = c(
-#     "Verified true event with missing risk assessment",
-#     "Pending signal with risk assessment recorded",
-#     "Not an event with risk assessment recorded"
-#   ),
-#   Records = c(
-#     sum(
-#       ems$signal_event_verification_status == "Verified true event" &
-#         is.na(ems$hra_auto_risk_assessment),
-#       na.rm = TRUE
-#     ),
-#     sum(
-#       ems$signal_event_verification_status == "Pending" &
-#         !is.na(ems$hra_auto_risk_assessment),
-#       na.rm = TRUE
-#     ),
-#     sum(
-#       ems$signal_event_verification_status == "Not an event" &
-#         !is.na(ems$hra_auto_risk_assessment),
-#       na.rm = TRUE
-#     )
-#   )
-# )
-# 
-# 
-# 
-# 
-# # generate a table for risk assessment inconsistencies 
-# ind5_workflow %>%
-#   gt::gt() %>%
-#   gt::tab_header(
-#     title = "Risk Assessment Workflow Inconsistencies"
-#   ) %>%
-#   gt::grand_summary_rows(
-#     columns = Records,
-#     fns = list(
-#       Total = ~sum(.)
-#     )
-#   )
+flextable(ind5_pending_risk_table) %>%
+  set_caption("Top 20 Districts with Pending Signals and Risk Assessment Recorded") %>%
+  bold(part = "header") %>%
+  bold(i = ~ district == "Total") %>%
+  align(
+    j = c("Records", "Risk Assessment Recorded", "% with Risk Assessment"),
+    align = "center",
+    part = "all"
+  ) %>%
+  autofit()
 
 
+# ============================================================
+# INDICATOR 6 — PENDING VERIFICATION BACKLOG
+# ============================================================
 
-# Indicator 6 — Pending verification backlog
-
-# Check the age of active unresolved Signals
-
+# Quick check on the age of active unresolved Signals
 ems %>%
   filter(
     type_of_entry == "Signal",
@@ -1047,75 +938,50 @@ ems %>%
     unresolved_signals = n()
   )
 
+# `days_pending` / `pending_age_band` were already calculated once, in the
+# "Creating derived variables" section above — no need to recompute them
+# here (previously this was duplicated).
 
-# Define the analysis end date from the latest registration date
-
-analysis_end_date <- max(
-  ems$signal_event_registration_date,
-  na.rm = TRUE
-)
-
-# Calculate how long active unresolved Signals have remained pending
-
-ems <- ems %>%
-  mutate(
-    days_pending = if_else(
-      type_of_entry == "Signal" &
-        (is.na(signal_event_verification_status) |
-           signal_event_verification_status == "Pending") &
-        program_status == "Active",
-      as.numeric(
-        analysis_end_date - signal_event_registration_date
-      ),
-      NA_real_
-    ),
-    
-    pending_age_band = case_when(
-      !is.na(days_pending) & days_pending <= 7 ~ "0–7 days",
-      !is.na(days_pending) & days_pending <= 14 ~ "8–14 days",
-      !is.na(days_pending) & days_pending > 14 ~ ">14 days",
-      TRUE ~ NA_character_
-    )
-  )
-
-# Indicator 6 — Top 20 districts by pending verification backlog
-
+# Top 20 districts by pending verification backlog
 ems %>%
   filter(
     type_of_entry == "Signal",
     program_status == "Active",
     !is.na(pending_age_band)
   ) %>%
-  count(
-    district,
-    pending_age_band
-  ) %>%
+  count(district, pending_age_band) %>%
   tidyr::pivot_wider(
     names_from = pending_age_band,
     values_from = n,
     values_fill = 0
   ) %>%
   mutate(
-    `Total unresolved` =
-      `0–7 days` +
-      `8–14 days` +
-      `>14 days`
+    `Total unresolved` = `0–7 days` + `8–14 days` + `>14 days`
   ) %>%
+  select(district, `0–7 days`, `8–14 days`, `>14 days`, `Total unresolved`) %>%
   arrange(desc(`Total unresolved`)) %>%
   slice_head(n = 20) %>%
-  gt::gt() %>%
-  gt::tab_header(
-    title = "Top 20 Districts by Pending Verification Backlog"
+  bind_rows(
+    summarise(
+      .,
+      district = "Total",
+      `0–7 days` = sum(`0–7 days`),
+      `8–14 days` = sum(`8–14 days`),
+      `>14 days` = sum(`>14 days`),
+      `Total unresolved` = sum(`Total unresolved`)
+    )
   ) %>%
-  gt::grand_summary_rows(
-    columns = c(
-      `0–7 days`,
-      `8–14 days`,
-      `>14 days`,
-      `Total unresolved`
-    ),
-    fns = list(
-      Total = ~sum(.)))
+  flextable() %>%
+  set_caption("Top 20 Districts by Pending Verification Backlog") %>%
+  bold(part = "header") %>%
+  bold(i = ~ district == "Total") %>%
+  align(
+    j = c("0–7 days", "8–14 days", ">14 days", "Total unresolved"),
+    align = "center",
+    part = "all"
+  ) %>%
+  autofit()
+
 
 # ============================================================
 # INDICATOR 7A — TYPE OF ENTRY
@@ -1123,26 +989,16 @@ ems %>%
 
 ind7_type <- ems %>%
   count(type_of_entry) %>%
-  mutate(
-    `%` = round(100 * n / sum(n), 1)
-  ) %>%
-  rename(
-    `Type of Entry` = type_of_entry,
-    Records = n
-  )
+  mutate(`%` = round(100 * n / sum(n), 1)) %>%
+  rename(`Type of Entry` = type_of_entry, Records = n)
 
 ind7_type %>%
   gt::gt() %>%
-  gt::tab_header(
-    title = "EMS Records by Type of Entry"
-  ) %>%
+  gt::tab_header(title = "EMS Records by Type of Entry") %>%
   gt::grand_summary_rows(
     columns = c(Records, `%`),
-    fns = list(
-      Total = ~sum(.)
-    )
+    fns = list(Total = ~sum(.))
   )
-
 
 
 # ============================================================
@@ -1151,24 +1007,15 @@ ind7_type %>%
 
 ind7_verification <- ems %>%
   count(signal_event_verification_status) %>%
-  mutate(
-    `%` = round(100 * n / sum(n), 1)
-  ) %>%
-  rename(
-    `Verification Status` = signal_event_verification_status,
-    Records = n
-  )
+  mutate(`%` = round(100 * n / sum(n), 1)) %>%
+  rename(`Verification Status` = signal_event_verification_status, Records = n)
 
 ind7_verification %>%
   gt::gt() %>%
-  gt::tab_header(
-    title = "EMS Records by Verification Status"
-  ) %>%
+  gt::tab_header(title = "EMS Records by Verification Status") %>%
   gt::grand_summary_rows(
     columns = c(Records, `%`),
-    fns = list(
-      Total = ~sum(.)
-    )
+    fns = list(Total = ~sum(.))
   )
 
 
@@ -1178,42 +1025,31 @@ ind7_verification %>%
 
 ind7_program <- ems %>%
   count(program_status) %>%
-  mutate(
-    `%` = round(100 * n / sum(n), 1)
-  ) %>%
-  rename(
-    `Program Status` = program_status,
-    Records = n
-  )
+  mutate(`%` = round(100 * n / sum(n), 1)) %>%
+  rename(`Program Status` = program_status, Records = n)
 
 ind7_program %>%
   gt::gt() %>%
-  gt::tab_header(
-    title = "EMS Records by Program Status"
-  ) %>%
+  gt::tab_header(title = "EMS Records by Program Status") %>%
   gt::grand_summary_rows(
     columns = c(Records, `%`),
-    fns = list(
-      Total = ~sum(.)
-    )
+    fns = list(Total = ~sum(.))
   )
+
 
 # ============================================================
 # SECTION 8 — OVERALL OPERATIONAL FLAGS AND SUMMARY
 # ============================================================
 #
 # Purpose:
-# Combine the individual operational checks into a single
-# record-level assessment of whether an EMS record requires
-# operational attention.
+# Combine the individual operational checks into a single record-level
+# assessment of whether an EMS record requires operational attention.
 #
 # Important:
 # - A record can have more than one operational issue.
-# - Each record is counted only once in the overall
-#   operational_flag.
+# - Each record is counted only once in the overall operational_flag.
 # - The overall flag is applied only to Signals and Events.
 # ============================================================
-
 
 
 # ------------------------------------------------------------
@@ -1228,10 +1064,7 @@ ems <- ems %>%
     flag_agent_syndrome =
       dplyr::coalesce(
         type_of_entry %in% c("Signal", "Event") &
-          agent_syndrome_field_status %in% c(
-            "Label only",
-            "Both fields blank"
-          ),
+          agent_syndrome_field_status %in% c("Label only", "Both fields blank"),
         FALSE
       ),
     
@@ -1239,10 +1072,8 @@ ems <- ems %>%
     # source field has not been recorded.
     flag_source =
       dplyr::coalesce(
-        (type_of_entry == "Signal" &
-           is.na(signal_source)) |
-          (type_of_entry == "Event" &
-             is.na(event_source)),
+        (type_of_entry == "Signal" & is.na(signal_source)) |
+          (type_of_entry == "Event" & is.na(event_source)),
         FALSE
       ),
     
@@ -1250,35 +1081,36 @@ ems <- ems %>%
     # has been documented.
     flag_verification =
       dplyr::coalesce(
-        type_of_entry == "Signal" &
-          is.na(signal_event_verification_status),
+        type_of_entry == "Signal" & is.na(signal_event_verification_status),
         FALSE
       ),
     
-    # Combine the two Indicator 5 risk-assessment
-    # workflow conditions into one operational flag.
+    # FIXED: previously referenced flag_missing_risk_assessment /
+    # flag_pending_with_risk_assessment, which only existed in the
+    # separate ems_ind5 object and were not present in `ems`. The two
+    # Indicator 5 conditions are now recomputed directly here so `ems`
+    # doesn't depend on ems_ind5 at all.
     flag_risk_assessment =
       dplyr::coalesce(
-        flag_missing_risk_assessment |
-          flag_pending_with_risk_assessment,
+        (signal_event_verification_status == "Verified true event" &
+           is.na(hra_auto_risk_assessment)) |
+          (type_of_entry == "Signal" &
+             signal_event_verification_status == "Pending" &
+             !is.na(hra_auto_risk_assessment)),
         FALSE
       ),
     
-    # Flag active Signals that remain unresolved,
-    # either Pending or without a documented
-    # verification status.
+    # Flag active Signals that remain unresolved, either Pending or
+    # without a documented verification status.
     flag_backlog =
       dplyr::coalesce(
         type_of_entry == "Signal" &
           program_status == "Active" &
-          (
-            signal_event_verification_status == "Pending" |
-              is.na(signal_event_verification_status)
-          ),
+          (signal_event_verification_status == "Pending" |
+             is.na(signal_event_verification_status)),
         FALSE
       )
   )
-
 
 
 # ------------------------------------------------------------
@@ -1294,7 +1126,6 @@ ems <- ems %>%
       flag_risk_assessment |
       flag_backlog
   )
-
 
 
 # ------------------------------------------------------------
@@ -1320,11 +1151,7 @@ ind_operational_summary <- tibble(
 
 ind_operational_summary %>%
   gt::gt() %>%
-  gt::tab_header(
-    title = "Operational Issues Identified in EMS Records"
-  )
-
-
+  gt::tab_header(title = "Operational Issues Identified in EMS Records")
 
 
 # ------------------------------------------------------------
@@ -1332,22 +1159,14 @@ ind_operational_summary %>%
 # ------------------------------------------------------------
 
 ind_operational_kpi <- ems %>%
-  filter(
-    type_of_entry %in% c("Signal", "Event")
-  ) %>%
+  filter(type_of_entry %in% c("Signal", "Event")) %>%
   summarise(
     Records_reviewed = n(),
     Records_flagged = sum(operational_flag),
-    Percent_flagged =
-      round(
-        100 * Records_flagged / Records_reviewed,
-        1
-      )
+    Percent_flagged = round(100 * Records_flagged / Records_reviewed, 1)
   )
 
 ind_operational_kpi
-
-
 
 
 # ------------------------------------------------------------
@@ -1355,9 +1174,7 @@ ind_operational_kpi
 # ------------------------------------------------------------
 
 ind_operational_overlap <- ems %>%
-  filter(
-    type_of_entry %in% c("Signal", "Event")
-  ) %>%
+  filter(type_of_entry %in% c("Signal", "Event")) %>%
   mutate(
     number_of_operational_flags =
       flag_agent_syndrome +
@@ -1367,76 +1184,53 @@ ind_operational_overlap <- ems %>%
       flag_backlog
   ) %>%
   count(number_of_operational_flags) %>%
-  mutate(
-    `%` = round(
-      100 * n / sum(n),
-      1
-    )
-  ) %>%
-  rename(
-    `Operational Issues per Record` =
-      number_of_operational_flags,
-    Records = n
-  )
+  mutate(`%` = round(100 * n / sum(n), 1)) %>%
+  rename(`Operational Issues per Record` = number_of_operational_flags, Records = n)
 
 ind_operational_overlap %>%
   gt::gt() %>%
-  gt::tab_header(
-    title = "Distribution of Operational Issues per EMS Record"
-  )
-
-
+  gt::tab_header(title = "Distribution of Operational Issues per EMS Record")
 
 
 # Calculate operational issue burden by district
 district_operational <- ems %>%
-  filter(
-    type_of_entry %in% c("Signal", "Event")
-  ) %>%
+  filter(type_of_entry %in% c("Signal", "Event")) %>%
   group_by(district_map) %>%
   summarise(
     Records = n(),
     `Records with ≥1 issue` = sum(operational_flag),
-    `% flagged` = round(
-      100 * `Records with ≥1 issue` / Records,
-      1
-    ),
+    `% flagged` = round(100 * `Records with ≥1 issue` / Records, 1),
     .groups = "drop"
   )
 
-
 # Join EMS operational results to district boundaries
 zambia_operational <- zambia_districts %>%
-  left_join(
-    district_operational,
-    by = c("adm2nm" = "district_map")
-  )
+  left_join(district_operational, by = c("adm2nm" = "district_map"))
 
-
-
-# Create categories for the operational burden map
+# Create categories for the operational burden map.
+# FIXED: added an explicit "No data" fallback for districts with no
+# matching records (Records = NA) — previously these fell through
+# case_when() with no matching condition and became silently NA, which
+# had no defined color in scale_fill_manual() below.
 zambia_operational <- zambia_operational %>%
   mutate(
     map_category = case_when(
+      is.na(Records) ~ "No data",
       Records < 20 ~ "Fewer than 20 records",
       `% flagged` <= 25 ~ "0–25%",
       `% flagged` <= 50 ~ "26–50%",
       `% flagged` <= 75 ~ "51–75%",
-      `% flagged` > 75 ~ ">75%"
+      `% flagged` > 75 ~ ">75%",
+      TRUE ~ "No data"
     )
   )
 
-
-
-# map showing districts with 1 or more operational issues 
+# Map showing districts with 1 or more operational issues
 ggplot(zambia_operational) +
-  geom_sf(
-    aes(fill = map_category),
-    color = "white",
-    linewidth = 0.2
-  ) +
+  geom_sf(aes(fill = map_category), color = "white", linewidth = 0.2) +
   scale_fill_manual(
     values = c(
+      "No data" = "grey95",
       "Fewer than 20 records" = "grey80",
       "0–25%" = "#FFF2CC",
       "26–50%" = "#FFD966",
@@ -1451,22 +1245,21 @@ ggplot(zambia_operational) +
   ) +
   theme_void() +
   theme(
-    plot.title = element_text(
-      face = "bold",
-      size = 14
-    ),
-    plot.subtitle = element_text(
-      size = 10
-    ),
-    legend.title = element_text(
-      face = "bold"
-    )
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10),
+    legend.title = element_text(face = "bold")
   )
 
 
-# Calculate the monthly percentage of Signal/Event records with
-# at least one operational issue.
-# This removes the effect of changes in the monthly number of records reviewed.
+# Calculate the monthly percentage of Signal/Event records with at least
+# one operational issue. This removes the effect of changes in the
+# monthly number of records reviewed.
+#
+# NOTE: year == 2026 / month <= 8 are still hardcoded here to match your
+# current Jan–Aug 2026 baseline period. Once you start running this
+# monthly, this filter should become dynamic (e.g. driven by a
+# `report_month` parameter) rather than hardcoded — happy to wire that up
+# when you're ready.
 monthly_baseline <- ems %>%
   filter(
     type_of_entry %in% c("Signal", "Event"),
@@ -1474,58 +1267,31 @@ monthly_baseline <- ems %>%
     lubridate::month(signal_event_registration_date) <= 8
   ) %>%
   mutate(
-    month = lubridate::floor_date(
-      signal_event_registration_date,
-      unit = "month"
-    )
+    month = lubridate::floor_date(signal_event_registration_date, unit = "month")
   ) %>%
   group_by(month) %>%
   summarise(
     `Records reviewed` = n(),
     `Records flagged` = sum(operational_flag),
-    `% flagged` = round(
-      100 * `Records flagged` / `Records reviewed`,
-      1
-    ),
+    `% flagged` = round(100 * `Records flagged` / `Records reviewed`, 1),
     .groups = "drop"
   )
 
-# Review the monthly percentages before plotting.
 monthly_baseline
 
-
-
-# Plot the monthly percentage of Signal/Event records with
-# at least one operational issue.
-# This will serve as the baseline trend for future monthly reviews.
-ggplot(
-  monthly_baseline,
-  aes(
-    x = month,
-    y = `% flagged`
-  )
-) +
-  geom_line(
-    linewidth = 1
-  ) +
-  geom_point(
-    size = 2.5
-  ) +
+# Plot the monthly percentage of Signal/Event records with at least one
+# operational issue. This serves as the baseline trend for future
+# monthly reviews.
+ggplot(monthly_baseline, aes(x = month, y = `% flagged`)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
   geom_text(
-    aes(
-      label = paste0(`% flagged`, "%")
-    ),
+    aes(label = paste0(`% flagged`, "%")),
     vjust = -0.8,
     size = 3.5
   ) +
-  scale_x_date(
-    date_breaks = "1 month",
-    date_labels = "%b"
-  ) +
-  scale_y_continuous(
-    limits = c(0, 100),
-    labels = function(x) paste0(x, "%")
-  ) +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b") +
+  scale_y_continuous(limits = c(0, 100), labels = function(x) paste0(x, "%")) +
   labs(
     title = "Monthly EMS Operational Issue Baseline, January–August 2026",
     subtitle = "Percentage of Signal/Event records with ≥1 operational issue",
@@ -1539,23 +1305,15 @@ ggplot(
   )
 
 
-
-
 # Calculate the headline indicators for the operational review.
 overview <- ems %>%
-  filter(
-    type_of_entry %in% c("Signal", "Event")
-  ) %>%
+  filter(type_of_entry %in% c("Signal", "Event")) %>%
   summarise(
     `Records reviewed` = n(),
     `Records with ≥1 issue` = sum(operational_flag),
-    `% with ≥1 issue` = round(
-      100 * `Records with ≥1 issue` / `Records reviewed`,
-      1
-    ),
+    `% with ≥1 issue` = round(100 * `Records with ≥1 issue` / `Records reviewed`, 1),
     `Pending verification backlog` = sum(flag_backlog),
     `Reporting districts` = n_distinct(district)
   )
 
-# Review the overview indicators
 overview
